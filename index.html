@@ -2,7 +2,12 @@
 <html>
 <head>
 <meta charset="utf-8" />
+
 <title>2D Heat FD Solver — ADI + warmed air + fins</title>
+<!-- ADD THIS LINE FOR ZIP FUNCTIONALITY -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+
 <style>
   /* -------- Base & Host-page hardening -------- */
   * { box-sizing: border-box; }
@@ -200,11 +205,26 @@ button {
       <input id="nx" type="number" value="80" min="10" max="400" />
       <label for="dt">Time step,s 0 = auto</label>
       <input id="dt" type="number" value="0" step="0.0001" />
-      <div class="row center" style="margin-top:6px">
-        <button id="solveTransient" type="button">Solve Transient</button>
-        <button id="solveSteady" type="button">Solve Steady</button>
-        <button id="pauseSim" type="button">Pause</button>
-      </div>
+      
+
+
+<div class="row center" style="margin-top:6px">
+  <button id="solveTransient" type="button">Solve Transient</button>
+  <button id="solveSteady" type="button">Solve Steady</button>
+  <button id="pauseSim" type="button">Pause</button>
+</div>
+
+<!-- ADD THESE FOUR BUTTONS HERE -->
+<div class="row center" style="margin-top:6px; gap:8px;">
+  <button id="exportJsonBtn" type="button" style="background: #fff3cd; border: 1px solid #ffc107; color: #856404;">💾 JSON</button>
+  <button id="importJsonBtn" type="button" style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460;">📂 Import</button>
+  <button id="exportCsvBtn" type="button" style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724;">📊 CSV</button>
+  <button id="exportZipBtn" type="button" style="background: #cfe2ff; border: 1px solid #b6d4fe; color: #084298;">📦 ZIP</button>
+</div>
+<!-- END OF NEW BUTTONS -->
+
+
+
       <div class="row" style="margin-top:6px">
         <label for="probeX">Probe X,Y (m)</label>
         <input id="probeX" type="number" value="0.05" step="0.001" />
@@ -1065,6 +1085,453 @@ updateSourcesList(); updateFinsList();
 resizeCanvasToAspect();
 redraw(); updateTaEstimate();
 
+/* ===== EXPORT/IMPORT FUNCTIONS ===== */
+
+// Helper function to get formatted timestamp
+function getTimestamp() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+}
+
+// 1. EXPORT JSON BUTTON
+document.getElementById('exportJsonBtn').addEventListener('click', () => {
+  const data = {
+    timestamp: new Date().toISOString(),
+    moduleType: '2d_heat_adi_warmed_air_fins',
+    geometry: {
+      widthM: parseFloat(document.getElementById('widthM').value),
+      heightM: parseFloat(document.getElementById('heightM').value),
+      thicknessM: parseFloat(document.getElementById('thicknessM').value),
+      material: document.getElementById('materialSelect').value
+    },
+    grid: {
+      nx: parseInt(document.getElementById('nx').value),
+      dt: parseFloat(document.getElementById('dt').value)
+    },
+    airflow: {
+      velocity: parseFloat(document.getElementById('airVel').value),
+      ambientT: parseFloat(document.getElementById('ambientT').value),
+      useWarmed: document.getElementById('useWarmed').checked,
+      flowDir: document.getElementById('flowDir').value,
+      bothSides: document.getElementById('bothSides').checked,
+      airH: parseFloat(document.getElementById('airH').value),
+      airRho: parseFloat(document.getElementById('airRho').value),
+      airCp: parseFloat(document.getElementById('airCp').value),
+      airTin: parseFloat(document.getElementById('airTin').value),
+      airMix: parseFloat(document.getElementById('airMix').value)
+    },
+    display: {
+      showTa: document.getElementById('showTa').checked,
+      showGrid: document.getElementById('showGrid').checked
+    },
+    probe: {
+      x: parseFloat(document.getElementById('probeX').value),
+      y: parseFloat(document.getElementById('probeY').value)
+    },
+    sources: sources.map(s => ({
+      rect: s.rect,
+      amplitude: s.amplitude,
+      type: s.type,
+      freq: s.freq,
+      label: s.label
+    })),
+    fins: fins.map(f => ({
+      rect: f.rect,
+      t: f.t,
+      L: f.L,
+      s: f.s,
+      k: f.k,
+      label: f.label
+    }))
+  };
+  
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `heat_adi_config_${getTimestamp()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// 2. IMPORT JSON BUTTON
+document.getElementById('importJsonBtn').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        
+        // Geometry
+        if (data.geometry) {
+          document.getElementById('widthM').value = data.geometry.widthM;
+          document.getElementById('heightM').value = data.geometry.heightM;
+          document.getElementById('thicknessM').value = data.geometry.thicknessM;
+          document.getElementById('materialSelect').value = data.geometry.material;
+        }
+        
+        // Grid
+        if (data.grid) {
+          document.getElementById('nx').value = data.grid.nx;
+          document.getElementById('dt').value = data.grid.dt;
+        }
+        
+        // Airflow
+        if (data.airflow) {
+          document.getElementById('airVel').value = data.airflow.velocity;
+          document.getElementById('ambientT').value = data.airflow.ambientT;
+          document.getElementById('useWarmed').checked = data.airflow.useWarmed !== undefined ? data.airflow.useWarmed : true;
+          document.getElementById('flowDir').value = data.airflow.flowDir || 'LR';
+          document.getElementById('bothSides').checked = data.airflow.bothSides || false;
+          document.getElementById('airH').value = data.airflow.airH;
+          document.getElementById('airRho').value = data.airflow.airRho;
+          document.getElementById('airCp').value = data.airflow.airCp;
+          document.getElementById('airTin').value = data.airflow.airTin;
+          document.getElementById('airMix').value = data.airflow.airMix;
+        }
+        
+        // Display
+        if (data.display) {
+          document.getElementById('showTa').checked = data.display.showTa || false;
+          document.getElementById('showGrid').checked = data.display.showGrid !== undefined ? data.display.showGrid : true;
+        }
+        
+        // Probe
+        if (data.probe) {
+          document.getElementById('probeX').value = data.probe.x;
+          document.getElementById('probeY').value = data.probe.y;
+        }
+        
+        // Sources
+        if (data.sources) {
+          sources.length = 0;
+          data.sources.forEach(s => {
+            sources.push({
+              rect: s.rect,
+              amplitude: s.amplitude,
+              type: s.type,
+              freq: s.freq,
+              label: s.label,
+              cells: []
+            });
+          });
+          onSourcesChanged();
+        }
+        
+        // Fins
+        if (data.fins) {
+          fins.length = 0;
+          data.fins.forEach(f => {
+            fins.push({
+              rect: f.rect,
+              t: f.t,
+              L: f.L,
+              s: f.s,
+              k: f.k,
+              label: f.label,
+              cells: []
+            });
+          });
+          updateFinsList();
+        }
+        
+        // Rebuild grid
+        setupGrid();
+        
+        alert('Configuration loaded successfully!');
+      } catch (err) {
+        alert('Error loading JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+});
+
+// 3. EXPORT CSV BUTTON (Temperature field + Time series)
+document.getElementById('exportCsvBtn').addEventListener('click', () => {
+  if (!grid || !grid.T) {
+    alert('No simulation data to export. Setup grid first.');
+    return;
+  }
+  
+  const timestamp = getTimestamp();
+  
+  // Create temperature field CSV
+  const { nx, ny, dx, dy, widthM, heightM, T } = grid;
+  let csv = 'X (m),Y (m),Temperature (°C)\n';
+  
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i;
+      const x = (i + 0.5) * dx;
+      const y = (j + 0.5) * dy;
+      const temp = T[idx];
+      csv += `${x.toFixed(6)},${y.toFixed(6)},${temp.toFixed(4)}\n`;
+    }
+  }
+  
+  // Download temperature field CSV
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `heat_adi_temperature_field_${timestamp}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  // Also export probe time series if available
+  if (timeSeries.length > 0) {
+    const tsRows = ['Time (s),Probe Temperature (°C)', ...timeSeries.map((t, i) => `${t.toFixed(6)},${tempSeries[i].toFixed(4)}`)];
+    const tsBlob = new Blob([tsRows.join('\n')], { type: 'text/csv' });
+    const tsUrl = URL.createObjectURL(tsBlob);
+    const tsA = document.createElement('a');
+    tsA.href = tsUrl;
+    tsA.download = `heat_adi_probe_timeseries_${timestamp}.csv`;
+    tsA.click();
+    URL.revokeObjectURL(tsUrl);
+  }
+});
+
+// 4. EXPORT ZIP BUTTON (CSV + Images + Config)
+document.getElementById('exportZipBtn').addEventListener('click', async () => {
+  if (!grid || !grid.T) {
+    alert('No simulation data to export. Setup grid first.');
+    return;
+  }
+  
+  if (typeof JSZip === 'undefined') {
+    alert('JSZip library not loaded. Please refresh the page.');
+    return;
+  }
+  
+  const zip = new JSZip();
+  const timestamp = getTimestamp();
+  
+  // 1. Add temperature field CSV
+  const { nx, ny, dx, dy, widthM, heightM, T } = grid;
+  let csv = 'X (m),Y (m),Temperature (°C)\n';
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i;
+      const x = (i + 0.5) * dx;
+      const y = (j + 0.5) * dy;
+      const temp = T[idx];
+      csv += `${x.toFixed(6)},${y.toFixed(6)},${temp.toFixed(4)}\n`;
+    }
+  }
+  zip.file(`temperature_field_${timestamp}.csv`, csv);
+  
+  // 2. Add probe time series CSV if available
+  if (timeSeries.length > 0) {
+    const tsRows = ['Time (s),Probe Temperature (°C)', ...timeSeries.map((t, i) => `${t.toFixed(6)},${tempSeries[i].toFixed(4)}`)];
+    zip.file(`probe_timeseries_${timestamp}.csv`, tsRows.join('\n'));
+  }
+  
+  // 3. Add main canvas image (temperature field)
+  const mainDataUrl = canvas.toDataURL('image/png');
+  const mainBase64 = mainDataUrl.split(',')[1];
+  zip.file(`temperature_heatmap_${timestamp}.png`, mainBase64, { base64: true });
+  
+  // 4. Add temperature field without overlays
+  const showTaWas = document.getElementById('showTa').checked;
+  const showGridWas = document.getElementById('showGrid').checked;
+  document.getElementById('showTa').checked = false;
+  document.getElementById('showGrid').checked = false;
+  lastClickMarker = null;
+  redraw();
+  const cleanDataUrl = canvas.toDataURL('image/png');
+  const cleanBase64 = cleanDataUrl.split(',')[1];
+  zip.file(`temperature_heatmap_clean_${timestamp}.png`, cleanBase64, { base64: true });
+  
+  // 5. Add Ta (air temperature) heatmap if warmed air is enabled
+  if (document.getElementById('useWarmed').checked) {
+    document.getElementById('showTa').checked = true;
+    redraw();
+    const taDataUrl = canvas.toDataURL('image/png');
+    const taBase64 = taDataUrl.split(',')[1];
+    zip.file(`air_temperature_heatmap_${timestamp}.png`, taBase64, { base64: true });
+  }
+  
+  // Restore display state
+  document.getElementById('showTa').checked = showTaWas;
+  document.getElementById('showGrid').checked = showGridWas;
+  redraw();
+  
+  // 6. Add probe plot if available
+  if (timeSeries.length > 0) {
+    const plotDataUrl = plotCanvas.toDataURL('image/png');
+    const plotBase64 = plotDataUrl.split(',')[1];
+    zip.file(`probe_plot_${timestamp}.png`, plotBase64, { base64: true });
+  }
+  
+  // 7. Add fin schematic
+  const finSvg = document.getElementById('finSchematic');
+  const serializer = new XMLSerializer();
+  const svgString = serializer.serializeToString(finSvg);
+  zip.file(`fin_schematic_${timestamp}.svg`, svgString);
+  
+  // 8. Add configuration JSON
+  const config = {
+    timestamp: new Date().toISOString(),
+    moduleType: '2d_heat_adi_warmed_air_fins',
+    geometry: {
+      widthM: parseFloat(document.getElementById('widthM').value),
+      heightM: parseFloat(document.getElementById('heightM').value),
+      thicknessM: parseFloat(document.getElementById('thicknessM').value),
+      material: document.getElementById('materialSelect').value
+    },
+    materialProperties: grid ? {
+      k: grid.k,
+      rho: grid.rho,
+      cp: grid.cp,
+      alpha: grid.alpha
+    } : null,
+    grid: {
+      nx: grid ? grid.nx : parseInt(document.getElementById('nx').value),
+      ny: grid ? grid.ny : null,
+      dx: grid ? grid.dx : null,
+      dy: grid ? grid.dy : null,
+      dt_setting: parseFloat(document.getElementById('dt').value)
+    },
+    airflow: {
+      velocity: parseFloat(document.getElementById('airVel').value),
+      ambientT: parseFloat(document.getElementById('ambientT').value),
+      useWarmed: document.getElementById('useWarmed').checked,
+      flowDir: document.getElementById('flowDir').value,
+      bothSides: document.getElementById('bothSides').checked,
+      airH: parseFloat(document.getElementById('airH').value),
+      airRho: parseFloat(document.getElementById('airRho').value),
+      airCp: parseFloat(document.getElementById('airCp').value),
+      airTin: parseFloat(document.getElementById('airTin').value),
+      airMix: parseFloat(document.getElementById('airMix').value),
+      estimated_h: grid ? estimateHfromVelocity(parseFloat(document.getElementById('airVel').value)).toFixed(2) + ' W/m²K' : null
+    },
+    simulation: {
+      currentTime: simTime.toFixed(4) + ' s',
+      running: simRunning
+    },
+    sources: sources.map((s, idx) => ({
+      index: idx + 1,
+      label: s.label,
+      rect: s.rect,
+      amplitude: s.amplitude,
+      type: s.type,
+      frequency: s.freq
+    })),
+    fins: fins.map((f, idx) => ({
+      index: idx + 1,
+      label: f.label,
+      rect: f.rect,
+      thickness_t_m: f.t,
+      length_L_m: f.L,
+      spacing_s_m: f.s,
+      conductivity_k: f.k
+    })),
+    results: grid ? {
+      min_temp_C: Math.min(...grid.T).toFixed(2),
+      max_temp_C: Math.max(...grid.T).toFixed(2),
+      avg_temp_C: (grid.T.reduce((a, b) => a + b, 0) / grid.T.length).toFixed(2),
+      total_heat_sources: sources.length,
+      total_fin_regions: fins.length
+    } : null
+  };
+  zip.file(`config_${timestamp}.json`, JSON.stringify(config, null, 2));
+  
+  // 9. Add README
+  const totalPower = sources.reduce((sum, s) => {
+    const factor = (s.type === 'sine' ? (1 / Math.PI) : 1.0);
+    return sum + s.amplitude * factor;
+  }, 0);
+  
+  const readme = `2D Heat Solver with ADI, Warmed Air, and Fins - Export
+Generated: ${new Date().toLocaleString()}
+
+Contents:
+- temperature_field_${timestamp}.csv: Spatial temperature distribution (X, Y, T)
+${timeSeries.length > 0 ? `- probe_timeseries_${timestamp}.csv: Probe temperature vs time\n` : ''}
+- temperature_heatmap_${timestamp}.png: Temperature field visualization with overlays
+- temperature_heatmap_clean_${timestamp}.png: Temperature field without overlays
+${document.getElementById('useWarmed').checked ? `- air_temperature_heatmap_${timestamp}.png: Air temperature (Ta) field\n` : ''}
+${timeSeries.length > 0 ? `- probe_plot_${timestamp}.png: Probe temperature vs time plot\n` : ''}
+- fin_schematic_${timestamp}.svg: Fin geometry end-view (SVG)
+- config_${timestamp}.json: Complete simulation configuration and results
+
+Simulation Parameters:
+- Plate dimensions: ${widthM.toFixed(3)} m × ${heightM.toFixed(3)} m × ${parseFloat(document.getElementById('thicknessM').value).toFixed(4)} m
+- Material: ${document.getElementById('materialSelect').value}
+${grid ? `  - Thermal conductivity k: ${grid.k} W/m·K\n` : ''}
+${grid ? `  - Density ρ: ${grid.rho} kg/m³\n` : ''}
+${grid ? `  - Specific heat cp: ${grid.cp} J/kg·K\n` : ''}
+${grid ? `  - Thermal diffusivity α: ${grid.alpha.toExponential(2)} m²/s\n` : ''}
+- Grid resolution: ${grid ? `${grid.nx} × ${grid.ny}` : `${document.getElementById('nx').value} cells`}
+
+Airflow Configuration:
+- Velocity: ${document.getElementById('airVel').value} m/s
+- Ambient temperature: ${document.getElementById('ambientT').value} °C
+- Warmed air model: ${document.getElementById('useWarmed').checked ? 'Enabled' : 'Disabled'}
+- Flow direction: ${document.getElementById('flowDir').value === 'LR' ? 'Left → Right' : 'Right → Left'}
+- Both sides: ${document.getElementById('bothSides').checked ? 'Yes' : 'No'}
+- Air gap height: ${document.getElementById('airH').value} m
+- Air properties: ρ=${document.getElementById('airRho').value} kg/m³, cp=${document.getElementById('airCp').value} J/kg·K
+${grid ? `- Estimated convection coefficient h: ${estimateHfromVelocity(parseFloat(document.getElementById('airVel').value)).toFixed(2)} W/m²K\n` : ''}
+
+Heat Sources (${sources.length}):
+${sources.map((s, i) => `  ${s.label}: ${s.amplitude.toFixed(2)} W, ${s.type}${s.type === 'sine' ? ` @ ${s.freq} Hz` : ''}`).join('\n')}
+${sources.length > 0 ? `  Total effective power: ${totalPower.toFixed(2)} W\n` : ''}
+
+Fin Regions (${fins.length}):
+${fins.map((f, i) => `  ${f.label}: t=${f.t.toExponential(2)} m, L=${f.L.toFixed(3)} m, s=${f.s.toFixed(3)} m, k=${f.k} W/m·K`).join('\n')}
+
+${grid ? `Results:\n` : ''}
+${grid ? `- Minimum temperature: ${Math.min(...grid.T).toFixed(2)} °C\n` : ''}
+${grid ? `- Maximum temperature: ${Math.max(...grid.T).toFixed(2)} °C\n` : ''}
+${grid ? `- Average temperature: ${(grid.T.reduce((a, b) => a + b, 0) / grid.T.length).toFixed(2)} °C\n` : ''}
+${grid ? `- Simulation time: ${simTime.toFixed(4)} s\n` : ''}
+
+Probe Location:
+- X: ${document.getElementById('probeX').value} m
+- Y: ${document.getElementById('probeY').value} m
+${grid && timeSeries.length > 0 ? `- Data points logged: ${timeSeries.length}\n` : ''}
+
+Notes:
+- ADI (Alternating Direction Implicit) method used for time integration
+- Warmed air model accounts for row-wise crossflow heating
+- Fin effectiveness calculated using classical fin theory
+- Time series data available if transient simulation was run
+`;
+  zip.file('README.txt', readme);
+  
+  // Generate and download ZIP
+  try {
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `heat_adi_export_${timestamp}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Error creating ZIP file: ' + err.message);
+  }
+});
+
+
+
 </script>
 </body>
 </html>
+
